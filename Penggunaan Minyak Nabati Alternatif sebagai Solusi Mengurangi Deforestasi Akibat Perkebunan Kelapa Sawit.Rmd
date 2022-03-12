@@ -1,0 +1,367 @@
+---
+title: "Analisis Penggunaan Minyak Nabati Alternatif sebagai Solusi Mengurangi Deforestasi Akibat Perkebunan Kelapa Sawit"
+author: "Risqi Rahmatullah"
+output:
+  html_document:
+    fig_width: 8
+    fig_height: 4
+    code_folding: hide
+---
+<style>
+p.caption {
+  font-size: 0.75em;
+}
+</style>
+```{r, echo=F, message=F, warning=FALSE}
+# library
+library(ggplot2)
+library(dplyr)
+library(reshape2)
+library(plotly)
+library(rgdal)
+library(leaflet)
+library(RColorBrewer)
+library(htmltools)
+```
+  
+  Kelapa sawit adalah salah satu penghasil minyak nabati untuk beberapa produk makanan, kebersihan, kosmetik, dan bahan bakar nabati. Komoditas ini merupakan produk perkebunan yang hanya hidup di daerah tropis, sepanjang garis khatulistiwa (Priyono, 2017). Sebagian besar minyak sawit diproduksi di Asia, Afrika dan Amerika Selatan karena pohon kelapa sawit membutuhkan suhu hangat, sinar matahari, dan curah hujan tinggi (INDONESIA-INVESTMENTS, 2017). Dalam grafik, kita dapat melihat produksi tanaman kelapa sawit sebagian besar negara di sepanjang khatulistiwa.  
+
+**Produksi Kelapa Sawit Dunia tahun 2018**
+```{r, warning=FALSE}
+# data source
+## oil palm production
+oil_palm_prod <- read.csv("https://raw.githubusercontent.com/risqi-r/data-visualization/main/datasets/Crops_Processed_-_Production_Quantity_-_Oil_Palm_FAOSTAT_data_7-6-2021.csv")
+## world map
+download.file("http://thematicmapping.org/downloads/TM_WORLD_BORDERS_SIMPL-0.3.zip", destfile="world_shape_file.zip")
+
+unzip(paste0(getwd(),"/world_shape_file.zip"),
+      exdir=paste0(getwd(),"/world_shape_file"))
+
+# Read shape file
+world_spdf <- readOGR( 
+  dsn= paste0(getwd(),"/world_shape_file"), 
+  layer="TM_WORLD_BORDERS_SIMPL-0.3",
+  verbose=FALSE
+)
+# match the country name in the map data with the production data
+world_spdf@data$NAME[world_spdf@data$NAME == "Democratic People's Republic of Korea"] <- "Korea, Democratic People's Republic of"
+world_spdf@data$NAME[world_spdf@data$NAME == "CÃ´te d'Ivoire"] <- "Cote d'Ivoire"
+world_spdf@data$NAME[world_spdf@data$NAME == "Venezuela (Bolivarian Republic of)"] <- "Venezuela"
+
+# get index to insert into dataset
+# this index is used to sort the map data back after the data is merged
+world_spdf@data <- cbind(index = as.numeric(rownames(world_spdf@data)),
+                         world_spdf@data)
+# only data of 2018
+oil_palm_prod18 <- oil_palm_prod[oil_palm_prod$Value > 0 &
+                                   oil_palm_prod$Year == 2018,
+                                 c("Area", "Value")]
+
+# merge map data and production data
+world_spdf@data <- merge(x=world_spdf@data,
+                         y=oil_palm_prod18,
+                         by.x=c("NAME"),
+                         by.y=c("Area"),
+                         all.x=TRUE)
+
+# order by original index
+world_spdf@data <- world_spdf@data[order(world_spdf@data$index),]
+
+# Create a color palette with handmade bins.
+mybins <- c(0,10000,50000,250000,1000000,5000000,Inf)
+mypalette <- colorBin( palette="YlOrBr", domain=world_spdf@data$Value, na.color="transparent", bins=mybins)
+
+# Prepare the text for tooltips:
+mytext <- paste(
+  world_spdf@data$NAME,"<br/>", 
+  "Produksi: ", format(world_spdf@data$Value, big.mark = ".")," ton", 
+  sep="") %>%
+  lapply(htmltools::HTML)
+
+#equator line
+eq <- data.frame (lng = c(-180, 180),
+                  lat = c(0, 0))
+
+# Final Map
+leaflet(world_spdf) %>% 
+  addTiles()  %>% 
+  setView( lat=10, lng=0 , zoom=2) %>%
+  addPolygons( 
+    fillColor = ~mypalette(Value), 
+    stroke=TRUE, 
+    fillOpacity = 0.9, 
+    color="white", 
+    weight=0.3,
+    label = mytext,
+    labelOptions = labelOptions( 
+      style = list("font-weight" = "normal", padding = "3px 8px"), 
+      textsize = "13px", 
+      direction = "auto"
+    )
+  ) %>%
+  addPolygons(
+    data = eq,
+    lng = ~lng,
+    lat = ~lat,
+    weight = 3,
+    opacity = 0.5
+  ) %>%
+  addLegend(pal=mypalette, values=~Value, opacity=0.9, title = "Produksi dalam ton", position = "bottomright")
+```
+```{r}
+# data source
+oil_palm_import <- read.csv("https://raw.githubusercontent.com/risqi-r/data-visualization/main/datasets/New_Food_Balances_-_Import%20Quantity_-_Palm%20Oil_-_FAOSTAT_data_7-6-2021.csv")
+
+# remove missing values and sum values
+world_prod <- oil_palm_prod %>% 
+  group_by(Year) %>% 
+  summarise(Value = sum(Value, na.rm=TRUE))
+
+world_imp <- oil_palm_import %>% 
+  group_by(Year) %>% 
+  summarise(Value = sum(Value, na.rm=TRUE)*1000) # convert from 1000 tonnes to tonnes
+
+# latest year
+latest_year <- world_prod[which.max(world_prod$Year), ]$Year
+
+# in latest year world production
+world_prod_ly <- format(world_prod[world_prod$Year==latest_year,]$Value / 10**6, decimal.mark=",", digits=3)
+
+# in latest year, indonesia production
+indo_prod_ly <- oil_palm_prod[
+  (oil_palm_prod$Year==latest_year) &
+  (oil_palm_prod$Area=='Indonesia'),
+  ]$Value
+
+# percentage indonesia prod
+ind_percent_ly <- format(indo_prod_ly / world_prod[world_prod$Year==latest_year,]$Value * 100, decimal.mark=",", digits=2)
+
+# in latest year, malaysia production
+malay_prod_ly <- oil_palm_prod[
+  (oil_palm_prod$Year==latest_year) &
+  (oil_palm_prod$Area=='Malaysia'),
+  ]$Value
+
+# percentage malaysia prod
+malay_percent_ly <- format(malay_prod_ly / world_prod[world_prod$Year==latest_year,]$Value * 100, decimal.mark=",", digits=2)
+```
+  Pasar global minyak sawit didominasi oleh Indonesia dan Malaysia. Pada tahun `r latest_year`, dunia telah memproduksi `r world_prod_ly` juta ton kelapa sawit dan sekitar `r ind_percent_ly`% (`r format(indo_prod_ly/ 10**6, decimal.mark=",", digits=3)` juta ton) diproduksi oleh Indonesia. Produksi terbesar kedua, disumbangkan oleh Malaysia sebanyak `r format(malay_prod_ly / 10**6, decimal.mark=",", digits=3)` juta ton, `r malay_percent_ly`% dari produksi dunia.
+
+  Produksi minyak sawit yang kian meningkat setiap tahun ini untuk memenuhi peningkat permintaan minyak sawit di dunia yang pesat setiap tahun. Ritchie dan Rooser (2021) menjelaskan pasar minyak kelapa sawit meningkat begitu cepat karena produk ini digunakan dalam berbagai produk di seluruh dunia:
+
+* Lebih dari 68% digunakan dalam makanan mulai dari margarin hingga coklat, pizza, roti dan minyak goreng;
+
+* Sekitar 27% digunakan dalam aplikasi industri dan produk konsumen seperti sabun, deterjen, kosmetik dan bahan pembersih;
+
+* Sebesar 5% digunakan sebagai bahan bakar nabati untuk transportasi, listrik atau panas.
+[cari statistiknya atau hapus atau gantikan dengan info yang lain]
+```{r}
+# join production and import data using melt
+world_prod_imp <- melt(list(Produksi=world_prod[world_prod$Year>2013,],
+                       Impor=world_imp),
+                       id.vars = "Year")
+
+# rename columns
+names(world_prod_imp) <- c("Year", "Variable", "Value", "Indicator")
+
+# chart using ggplot and plotly
+pi <- ggplot(world_prod_imp,
+            aes(x=Year, y=Value, colour=Indicator, text=Indicator)) + 
+  geom_line() +
+  theme(legend.title=element_text(size = 1, colour = "white"),
+        legend.position="top right") +
+  labs(title = "Perbandingan Produksi dan Impor Minyak Sawit Dunia",
+       x = "Tahun", y = "Jumlah (Ton)",
+       caption = "Source:: FAOSTAT") +
+  scale_y_continuous(labels=scales::unit_format(unit = "juta", scale = 1e-6))
+
+pi <- ggplotly(pi)
+pi
+
+# masih butuh penjelasan grafik di atas, cari pembahasan tentang renggang antara jumlah produksi dan impor.]
+```
+
+  
+  Pemenuhan terhadap permintaan dunia ini memaksa terjadi perluasan perkebunan sehingga diduga banyak mengorbankan hutan tropis—yang merupakan habitat penting bagi banyak spesies yang terancam punah dan sumber kehidupan bagi beberapa komunitas manusia.
+```{r}
+# data source
+area_harvest <- read.csv("https://raw.githubusercontent.com/risqi-r/data-visualization/main/datasets/Crops_-_Area_Harvested_-_Oil_Palm_Fruit_FAOSTAT_data_7-10-2021.csv")
+
+# get top 5 country in 2019
+top_country <- top_n(area_harvest[area_harvest$Year=="2019",], 5, Value)$Area
+# filter the data based the top 10 country
+top_area_harvest <- filter(area_harvest, Area %in% top_country) %>%
+  select(Area, Year, Value)
+
+# other than the top 5 changed to 'other countries'
+other_area_harvest <- filter(area_harvest, !Area %in% top_country) %>%
+  group_by(Year) %>% 
+  summarise(Value = sum(Value, na.rm=TRUE)) %>%
+  mutate(Area = "Other Countries") %>%
+  select(Area, Year, Value)
+
+world_area_harvest <- area_harvest[!is.na(area_harvest$Value),] %>% 
+  group_by(Year) %>% 
+  summarise(Value = sum(Value, na.rm=TRUE)) %>%
+  mutate(Area = "World") %>%
+  select(Area, Year, Value)
+
+# combine all the data
+df_area_harvest <- rbind(top_area_harvest,
+                         other_area_harvest,
+                         world_area_harvest)
+
+ah <- ggplot(df_area_harvest,
+             aes(x=Year, y=Value, colour=Area)) + 
+  geom_line() +
+  theme(legend.position="right") +
+  labs(title = "Penggunaan Lahan untuk Produksi Minyak Sawit Dunia",
+       x = "Tahun", y = "Luas lahan (ha)",
+       caption = "Source: FAOSTAT") +
+  scale_x_continuous(breaks=seq(0, 2021, 5)) +
+  scale_y_continuous(breaks=seq(0, 30*10**6, 5*10**6),
+                     labels=scales::unit_format(unit = "juta", scale = 1e-6))
+ah <- ggplotly(ah)
+ah
+```
+``` {r, echo=F, message=F, warning=FALSE}
+# in 1961, world harvested area
+world1961_area <- format(world_area_harvest[world_area_harvest$Year==1961,]$Value  / 10**6, decimal.mark=",", digits=2)
+
+# in 2019, world harvested area
+world2019_area <- format(world_area_harvest[world_area_harvest$Year==2019,]$Value / 10**6, decimal.mark=",", digits=2)
+
+# percentage of Indonesia in 2019
+IM_percent <- format(sum(
+  df_area_harvest[
+    (df_area_harvest$Area =="Indonesia") &
+    (df_area_harvest$Year == 2019),
+  ]$Value) /
+  df_area_harvest[
+    (df_area_harvest$Area == "World") &
+    (df_area_harvest$Year == 2019),
+  ]$Value * 100,
+  digits=2)
+```
+  Sejak tahun 1961 jumlah lahan yang digunakan dunia telah meningkat lebih dari tujuh kali lipat, dari `r world1961_area` juta menjadi `r world2019_area` juta hektar pada tahun 2019. Tahun 2019, Indonesia sebagai negara dengan produksi terbesar menyumbang `r IM_percent`% dari penggunaan lahan dunia.
+  
+  Ritchie dan Rooser (2021) menyimpulkan seberapa besar hutan yang sebenarnya dikorbankan dalam ekspansi kelapa sawit dengan berfokus pada negara produksi terbesar, Indonesia.
+```{r}
+#data source
+deforest_indo <- read.csv("https://raw.githubusercontent.com/risqi-r/data-visualization/main/datasets/deforestation-drivers-indonesia.csv")
+
+# persentase oil palm plantations selama tahun 2001-2016
+total_def <- sum(deforest_indo$deforestation_hectares)
+opp_def <- sum(deforest_indo[deforest_indo$Entity=="Oil palm plantations",]$deforestation_hectares)
+persen_opp_def <- format(opp_def/total_def * 100, decimal.mark=",", digits=2)
+
+# persentase oil palm plantations pada tahun 2008
+total_def_08 <- sum(deforest_indo$deforestation_hectares[
+  deforest_indo$Year==2008])
+opp_def_08 <- sum(deforest_indo[
+  (deforest_indo$Entity=="Oil palm plantations") &
+  (deforest_indo$Year==2008),]$deforestation_hectares)
+persen_opp_def_08 <- format(opp_def_08/total_def_08 * 100, decimal.mark=",", digits=2)
+
+# persentase oil palm plantations pada tahun 2016
+total_def_16 <- sum(deforest_indo$deforestation_hectares[
+  deforest_indo$Year==2016])
+opp_def_16 <- sum(deforest_indo[
+  (deforest_indo$Entity=="Oil palm plantations") &
+  (deforest_indo$Year==2016),]$deforestation_hectares)
+persen_opp_def_16 <- format(opp_def_16/total_def_16 * 100, decimal.mark=",", digits=2)
+
+q <- ggplot(deforest_indo,
+            aes(color=Entity, fill=Entity, x=Year, y=deforestation_hectares)) +
+  theme(legend.title=element_text(size = 1, colour = "white")) +
+  geom_bar(size=0.25, position="fill", stat="identity") +
+  labs(title = "Pendorong deforestasi di Indonesia",
+       x = "Tahun", y = "Persentase Luas Area") +
+  scale_x_continuous(breaks=seq(0, 2020, 2)) +
+  scale_y_continuous(labels=scales::unit_format(unit = "%", scale = 1e+2)) +
+  scale_color_manual(values=rep("white", 7)) +
+  scale_fill_manual(values="green", limits="Oil palm plantations")
+q <- ggplotly(q, tooltip=c("x", "y"))
+q
+
+# [bagusnya tambahkan lagi grafik stacked tapi bukan persentase, supaya bisa dilihat berapa nilainya atau mungkin tambahkan info tambahan dalam satuan ha]
+# [bagusnya tambahkan deforestasi di negara malaysia]
+```
+  Selama 2001-2016, sebesar `r persen_opp_def`% deforestasi di Indonesia akibat perkebunan kelapa sawit. Namun, jika diperhatikan persentase ini sempat menurun selama dekade terakhir. Puncaknya terjadi pada tahun 2008, ketika mencapai `r persen_opp_def_08`%, lalu sejak itu terus menurun menjadi kurang dari `r persen_opp_def_16`% pada tahun 2016.
+  
+  Akibat deforestasi ini, muncul sebuah keputusan dari Uni Eropa untuk memboikot minyak sawit. Klepper (2018) mengatakan bahwa pada Januari 2018, *European Parliament* (EP) memilih untuk melarang penggunaan minyak sawit untuk produksi bahan bakar nabati di Uni Eropa dengan tujuan untuk menghentikan deforestasi hutan di Indonesia dan Malaysia. Ilaiha (2020) menjelaskan bahwa selanjutnya pada Desember 2018, Uni Eropa merevisi *Renewable Energy Directive* (RED) yang melarang penggunaan minyak sawit. Uni Eropa memutuskan untuk menggunakan minyak bunga matahari sebagai bahan bakar nabati alternatif yang diproduksi di Eropa.
+  
+  **Namun, apakah memboikot minyak sawit dan mengganti dengan komoditas minyak nabati lain adalah solusi yang tepat?**
+```{r, echo=F, message=F, warning=FALSE}
+# data source
+vegoil_prod13below <- read.csv("https://raw.githubusercontent.com/risqi-r/data-visualization/main/datasets/FoodBalances_-_Production-OilOnly_2013nBelow.csv")
+vegoil_prod14up <- read.csv("https://raw.githubusercontent.com/risqi-r/data-visualization/main/datasets/FoodBalances_-_Production-OilOnly_2014nUp.csv")
+vegoil_area_harvest <- read.csv("https://raw.githubusercontent.com/risqi-r/data-visualization/main/datasets/Crops_Area_Harvested-OilOnly.csv")
+
+vegoil_prod <- rbind(vegoil_prod13below, vegoil_prod14up)
+
+add_newItemCode <- function(dataset) {
+  mutate(dataset, Comodity = case_when(
+    grepl("Coconut", dataset$Item, ignore.case = TRUE) ~ "Coconut",
+    grepl("Cotton", dataset$Item, ignore.case = TRUE) ~ "Cottonseed",
+    grepl("Groundnut", dataset$Item, ignore.case = TRUE) ~ "Groundnut",
+    grepl("Maize", dataset$Item, ignore.case = TRUE) ~ "Maize",
+    grepl("Olive", dataset$Item, ignore.case = TRUE) ~ "Olive",
+    grepl("Palm", dataset$Item, ignore.case = TRUE) ~ "Palm",
+    grepl("Palmkernel", dataset$Item, ignore.case = TRUE) ~ "Palm",
+    grepl("Rape", dataset$Item, ignore.case = TRUE) ~ "Rape and Mustard",
+    grepl("Mustard", dataset$Item, ignore.case = TRUE) ~ "Rape and Mustard",
+    grepl("Rice", dataset$Item, ignore.case = TRUE) ~ "Ricebran",
+    grepl("Sesame", dataset$Item, ignore.case = TRUE) ~ "Sesameseed",
+    grepl("Soy", dataset$Item, ignore.case = TRUE) ~ "Soybean",
+    grepl("Sunflower", dataset$Item, ignore.case = TRUE) ~ "Sunflower",
+    TRUE ~ NA_character_
+  ))
+}
+
+world_vegoil_prod <- add_newItemCode(vegoil_prod) %>% 
+  group_by(Year, Comodity) %>% 
+  summarise(Value = sum(Value, na.rm=TRUE)*1000) %>%
+  rename(Production = Value)
+
+world_vegoil_areaharv <- add_newItemCode(vegoil_area_harvest) %>% 
+  group_by(Year, Comodity) %>% 
+  summarise(Value = sum(Value, na.rm=TRUE)) %>%
+  rename(Area_Harvested = Value)
+
+wvo_prodvsareaharv <-
+  merge(world_vegoil_prod, world_vegoil_areaharv, by=c("Year", "Comodity"))
+
+wvo_prodvsareaharv$Prod_per_ha <-
+  with(wvo_prodvsareaharv, Production/Area_Harvested)
+```
+```{r}
+fig <- ggplot(wvo_prodvsareaharv,
+            aes(x=reorder(Comodity, +Prod_per_ha),
+                y=Prod_per_ha,
+                frame=Year)) + 
+  geom_bar(stat="identity", position="identity")  +
+  labs(title = "Efisiensi Produksi Komoditas Minyak Nabati Tiap Tahun",
+       x = "Tanaman Minyak Nabati", y = "Produksi (ton) per Hektar",) + 
+  coord_flip()
+fig <- ggplotly(fig)
+fig
+```
+  
+  Jika kita perhatikan pada grafik, kelapa sawit adalah tanaman yang paling efisien di antara tanaman minyak nabati lainnya. Kelapa sawit menghasilkan rata-rata mendekati 3 ton/ha dan pernah mencapai atau lebih dari 3 ton/ha pada tahun 2006 - 2019. Jauh berbeda dengan tanaman minyak nabati lain yang hanya mendekati 1 ton/ha. Hal ini juga kurang lebih sama dengan hasil publikasi oleh  Noleppa dan Cartsburg (2016) pada *Palm Oil Report Germany, Searching for Alternatives*. Pada rata-rata global, kelapa sawit menghasilkan 3,3 ton minyak per hektar. Tanaman kedelai hanya menghasilkan 0,4 ton minyak per hektar, sedangkan kelapa dan biji bunga matahari menghasilkan sedikit di bawah 0,7 t/ha dan biji *rape* menghasilkan lebih dari 0,7 t/ha.
+  
+  <img src="https://github.com/risqi-r/data-visualization/blob/main/datasets/Comparison_of_global_oil_yields_by_crop_plant.PNG?raw=true" alt="Source: Noleppa dan Cartsburg (2016)" width="400"/>
+  <p class="caption">Sumber: Noleppa dan Cartsburg (2016)</p>
+  
+  Jika Uni Eropa menggunakan minyak bunga matahari sebagai bahan bakar nabati alternatif, maka untuk memenuhi produksi yang sama dengan kelapa sawit mereka akan membutuhkan lahan hingga 4 kali lebih banyak. Dalam kebanyakan kasus, beralih ke alternatif, seperti kedelai, kelapa, bunga matahari atau lobak, hanya memindahkan masalah yang terkait dengan produksi kelapa sawit ke daerah lain, atau memperburuknya. Tanaman minyak lainnya membutuhkan antara empat dan 10 kali lebih banyak lahan, dan akibatnya dapat memiliki dampak yang lebih besar pada isu-isu global deforestasi dan perusakan habitat.
+  
+  **Referensi**  
+Ilaiha, Intan Tawaddada. 2020. Is The EU’s War On Palm Oil Working? https://theaseanpost.com/article/eus-war-palm-oil-working (diakses pada tanggal 8 Juli 2021, 11:47 WITA)  
+Klepper, Gernot. 2018. Winners and losers from the EU's proposed ban on palm Oil. https://www.eco-business.com/opinion/winners-and-losers-from-the-eus-proposed-ban-on-palm-oil/ (diakses pada tanggal 8 Juli 2021, 11:30 WITA)  
+Lewis, Gary. 2021. Sustainable palm Oil. https://www.newfoodmagazine.com/article/151027/sustainable-palm-oil/ (diakses pada 3 Juli 2021, 19:24 WITA)  
+[INDONESIA-INVESTMENTS]. 2017. Minyak Kelapa Sawit. https://www.indonesia-investments.com/id/bisnis/komoditas/minyak-sawit/item166? (diakses pada 4 Juli 2021, 11:15 WITA)  
+Noleppa, Steffen dan Cartsburg, Matti. 2016. Palm Oil Report Germany, Searching for Alternatives. Berlin: WWF Deutschland.  
+Priyono, Joko. 2017. Sejarah Kelapa Sawit Indonesia. https://gapki.id/news/3652/video-sejarah-kelapa-sawit-indonesia (diakses pada 4 Juli 2021, 10:37 WITA)  
+Ritchie, H. dan Rooser M. 2021. Palm Oil. https://ourworldindata.org/palm-oil (diakses pada 3 Juli 2021, 19:20 WITA).  
+[WWF]. - . Palm Oil. https://www.worldwildlife.org/industries/palm-oil (diakses pada 4 Juli 2021, 11:15 WITA)  
+[WWF UK]. 2020. 8 Things to Know about Palm Oil. https://www.wwf.org.uk/updates/8-things-know-about-palm-oil (diakses pada 4 Juli 2021, 11:29 WITA)
